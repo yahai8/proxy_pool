@@ -3,6 +3,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
 mod test2;
+mod test3;
+
 
 async fn handle_client(mut inbound: TcpStream, pool_address: &str, target_address: &str, fee_percentage: f64) -> Result<(), Box<dyn std::error::Error>> {
     let mut outbound = TcpStream::connect(pool_address).await?;
@@ -46,7 +48,7 @@ fn modify_request(buffer: &mut Vec<u8>, target_address: &str) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-   test2::f2_porxy().expect("TODO: panic message");
+    test3::f2_proxy_v2();
     Ok(())
 }
 
@@ -67,5 +69,4 @@ async fn temp() -> Result<(), Box<dyn Error>> {
             }
         });
     }
-
 }
