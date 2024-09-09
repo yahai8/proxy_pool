@@ -48,9 +48,10 @@ fn modify_request(buffer: &mut Vec<u8>, target_address: &str) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    test3::f2_proxy_v2();
+    test3::f2_proxy_v2().expect("TODO: panic message");
     Ok(())
 }
+
 
 async fn temp() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("0.0.0.0:8080").await?;
