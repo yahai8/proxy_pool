@@ -1,73 +1,100 @@
-use std::error::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::sync::Arc;
-mod test2;
-mod test3;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::io;
+use std::str;
+use std::net::SocketAddr;
 
 
-async fn handle_client(mut inbound: TcpStream, pool_address: &str, target_address: &str, fee_percentage: f64) -> Result<(), Box<dyn std::error::Error>> {
-    let mut outbound = TcpStream::connect(pool_address).await?;
-    let mut buffer = vec![0; 1024];
+async fn handle_connection(client_stream: TcpStream, target_address: &str, user_keys: Arc<Mutex<HashMap<String, String>>>, key: String) {
+    // 创建与目标服务器的连接
+    let mut target_stream = match TcpStream::connect(target_address).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            eprintln!("Failed to connect to target server: {}", e);
+            return;
+        }
+    };
 
-    // Read from the client
-    let n = inbound.read(&mut buffer).await?;
-    if n == 0 {
-        return Ok(());
+    // 将用户的 key 存储在 HashMap 中
+    {
+        let mut user_keys = user_keys.lock().unwrap();
+        user_keys.insert(key.clone(), key);
     }
 
-    // Here you would parse the request and potentially modify it
-    // For example, if this is a mining subscribe request or a share submission,
-    // you might want to modify the mining address.
-    if should_divert(fee_percentage) {
-        modify_request(&mut buffer, target_address);
-    }
+    // Split streams into read and write halves
+    let (mut client_reader, mut client_writer) = client_stream.into_split();
+    let (mut target_reader, mut target_writer) = target_stream.into_split();
 
-    // Write to the pool
-    outbound.write_all(&buffer[0..n]).await?;
+    // Forward data from client to target and parse request
+    let client_to_target = tokio::spawn(async move {
+        let mut buffer = [0; 4096];
+        while let Ok(n) = client_reader.read(&mut buffer).await {
+            if n == 0 {
+                break; // EOF
+            }
+            // Parse and print request data (for debugging)
+            if let Ok(request_str) = str::from_utf8(&buffer[..n]) {
+                println!("Request to forward: {}", request_str);
+            }
 
-    // Relay response back to client
-    let n = outbound.read(&mut buffer).await?;
-    inbound.write_all(&buffer[0..n]).await?;
+            if let Err(e) = target_writer.write_all(&buffer[..n]).await {
+                eprintln!("Failed to write to target server: {}", e);
+                break;
+            }
+        }
+    });
 
-    Ok(())
-}
+    // Forward data from target to client and parse response
+    let target_to_client = tokio::spawn(async move {
+        let mut buffer = [0; 4096];
+        while let Ok(n) = target_reader.read(&mut buffer).await {
+            if n == 0 {
+                break; // EOF
+            }
+            // Parse and print response data (for debugging)
+            if let Ok(response_str) = str::from_utf8(&buffer[..n]) {
+                println!("Response from target: {}", response_str);
+            }
 
-// Function to decide if we should divert this request
-fn should_divert(fee_percentage: f64) -> bool {
-    // Simple logic for diversion based on fee percentage
-    rand::random::<f64>() < fee_percentage
-}
+            if let Err(e) = client_writer.write_all(&buffer[..n]).await {
+                eprintln!("Failed to write to client: {}", e);
+                break;
+            }
+        }
+    });
 
-// Function to modify the mining address in the request
-fn modify_request(buffer: &mut Vec<u8>, target_address: &str) {
-    // Parse the buffer and replace the original mining address with target_address
-    // This is highly protocol-dependent and requires detailed parsing.
-    println!("开始抽水！")
+    // Wait for both tasks to complete
+    let _ = tokio::try_join!(client_to_target, target_to_client);
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    test3::f2_proxy_v2().expect("TODO: panic message");
-    Ok(())
-}
+async fn main() -> io::Result<()> {
+    // 获取监听端口和目标服务器地址
+    let port = 9996;
+    let target_address = "aleo-asia.f2pool.com:4400";
+    let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().expect("Invalid address");
 
+    // 创建一个 HashMap 用于存储用户的 key
+    let user_keys: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
-async fn temp() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("0.0.0.0:8080").await?;
-    let pool_address = Arc::new("8.217.125.233:8896".to_string());
-    let target_address = Arc::new("your.wallet.address".to_string());
-    let fee_percentage = 0.01; // 1% fee
+    // 创建 TCP 监听器
+    let listener = TcpListener::bind(&addr).await?;
 
+    println!("Proxy server listening on http://{}", addr);
+
+    // 接收客户端连接并处理
     loop {
-        let (inbound, _) = listener.accept().await?;
-        let pool_address = Arc::clone(&pool_address);
-        let target_address = Arc::clone(&target_address);
+        let (client_stream, _) = listener.accept().await?;
+        let user_keys = Arc::clone(&user_keys);
 
-        tokio::spawn(async move {
-            if let Err(e) = handle_client(inbound, &pool_address, &target_address, fee_percentage).await {
-                eprintln!("Error handling client: {:?}", e);
-            }
-        });
+        // 提取 key（假设通过环境变量传递）
+        let key = match std::env::var("KEY") {
+            Ok(val) => val,
+            Err(_) => "default_key".to_string(),
+        };
+
+        tokio::spawn(handle_connection(client_stream, target_address, user_keys, key));
     }
 }
