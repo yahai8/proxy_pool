@@ -1,20 +1,20 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::io::{self, Write};
 use std::fs::File;
 use std::str;
 use std::net::SocketAddr;
+use fern::Dispatch;
+use log::{info, error};
 
 
-async fn handle_connection(client_stream: TcpStream, target_address: &str,log_file: Arc<Mutex<File>>) {
-    // 创建与目标服务器的连接
+async fn handle_connection(client_stream: TcpStream, target_address: &str) {
     let mut target_stream = match TcpStream::connect(target_address).await {
         Ok(stream) => stream,
         Err(e) => {
             // eprintln!("Failed to connect to target server: {}", e);
-            writeln!(log_file,"Failed to connect to target server: {}",e).expect("Failed to write to log file");
+            info!("Failed to connect to target server: {}", e);
             return;
         }
     };
@@ -31,13 +31,12 @@ async fn handle_connection(client_stream: TcpStream, target_address: &str,log_fi
             }
             if let Ok(request_str) = str::from_utf8(&buffer[..n]) {
                 // println!("Request to forward: {}", request_str);
-                writeln!(log_file,"Request to forward: {}", request_str).expect("Failed to write to log file");
-
+                info!("Request to forward: {}", request_str);
             }
 
             if let Err(e) = target_writer.write_all(&buffer[..n]).await {
                 // eprintln!("Failed to write to target server: {}", e);
-                writeln!(log_file,"Failed to write to target server: {}", e).expect("Failed to write to log file");
+                info!("Failed to write to target server: {}", e);
                 break;
             }
         }
@@ -53,13 +52,12 @@ async fn handle_connection(client_stream: TcpStream, target_address: &str,log_fi
             // 解析
             if let Ok(response_str) = str::from_utf8(&buffer[..n]) {
                 // println!("Response from target: {}", response_str);
-                writeln!(log_file,"Response from target: {}", response_str).expect("Failed to write to log file");
-
+                info!( "Response from target: {}", response_str);
             }
 
             if let Err(e) = client_writer.write_all(&buffer[..n]).await {
                 // eprintln!("Failed to write to client: {}", e);
-                writeln!(log_file,"Failed to write to client: {}", e).expect("Failed to write to log file");
+                info!("Failed to write to client: {}", e);
                 break;
             }
         }
@@ -70,6 +68,25 @@ async fn handle_connection(client_stream: TcpStream, target_address: &str,log_fi
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    // 创建文件和日志配置
+    let file = File::create("app.log")?;
+    let file = Arc::new(Mutex::new(file));
+
+    let file_clone = Arc::clone(&file);
+
+    Dispatch::new()
+        .format(move |out, message, record| {
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S");
+            let level = record.level();
+            let msg = message.to_string();
+            let mut file = file_clone.lock().unwrap();
+            writeln!(file, "[{}][{}] {}", timestamp, level, msg).ok();
+            out.finish(format_args!("{} - {}", timestamp, msg))
+        })
+        .chain(std::io::stdout()) // 输出到标准输出
+        .apply().expect("初始化错误");
+
+
     // 获取监听端口和目标服务器地址
     let port = 9996;
     let target_address = "aleo-asia.f2pool.com:4400";
@@ -77,15 +94,11 @@ async fn main() -> io::Result<()> {
     // 创建 TCP 监听器
     let listener = TcpListener::bind(&addr).await?;
 
-    println!("Proxy server listening on http://{}", addr);
-
-    // 打开日志文件
-    let log_file = File::create("server.log")?;
-    let log_file = Arc::new(Mutex::new(log_file));
+    info!("Proxy server listening on http://{}", addr);
     // 接收客户端连接并处理
     loop {
         let (client_stream, _) = listener.accept().await?;
-        let log_file = Arc::clone(&log_file);
-        tokio::spawn(handle_connection(client_stream, target_address,log_file));
+        tokio::spawn(handle_connection(client_stream, target_address));
     }
 }
+
