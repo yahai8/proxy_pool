@@ -33,9 +33,9 @@ fn handle_client(mut stream: TcpStream) {
 
 pub fn f2_porxy() -> std::io::Result<()> {
     // 创建一个监听 TCP 连接的 TcpListener
-    let listener = TcpListener::bind("0.0.0.0:9995")?;  // 监听9994端口
+    let listener = TcpListener::bind("0.0.0.0:9996")?;  // 监听9996端口
 
-    println!("Listening on port 9994");
+    println!("Listening on port 9996");
 
     // 接收连接请求
     for stream in listener.incoming() {
