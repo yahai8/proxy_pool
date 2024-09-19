@@ -7,7 +7,7 @@ use std::str;
 use std::net::SocketAddr;
 use fern::Dispatch;
 use log::{info, error};
-
+mod test4;
 
 async fn handle_connection(client_stream: TcpStream, target_address: &str) {
     let mut target_stream = match TcpStream::connect(target_address).await {
@@ -88,7 +88,7 @@ async fn main() -> io::Result<()> {
 
 
     // 获取监听端口和目标服务器地址
-    let port = 9996;
+    let port = 32632;
     let target_address = "aleo-asia.f2pool.com:4400";
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().expect("Invalid address");
     // 创建 TCP 监听器
